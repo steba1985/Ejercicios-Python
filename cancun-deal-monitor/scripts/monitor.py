@@ -281,32 +281,115 @@ def send_email(subject: str, body: str) -> None:
             server.send_message(msg)
 
 
+def search_windows() -> list[dict[str, str]]:
+    """Ventanas de fechas a replicar manualmente (prioriza marzo)."""
+    raw = os.getenv(
+        "SEARCH_WINDOWS",
+        "2026-03-07|2026-03-20|prioridad marzo;2026-03-12|2026-03-19|marzo mid;"
+        "2026-03-23|2026-03-31|marzo late (ref. USD469);2026-02-28|2026-03-07|puente feb-mar",
+    )
+    windows: list[dict[str, str]] = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split("|")
+        if len(bits) < 2:
+            continue
+        windows.append(
+            {
+                "outbound": bits[0].strip(),
+                "inbound": bits[1].strip(),
+                "label": bits[2].strip() if len(bits) > 2 else "",
+            }
+        )
+    return windows
+
+
+def format_clp(n: int | None) -> str:
+    if n is None:
+        return "N/D"
+    return f"${n:,}".replace(",", ".")
+
+
 def format_report(quotes: list[dict[str, Any]], level: str | None, best: int | None) -> str:
+    windows = search_windows()
+    primary = windows[0] if windows else {
+        "outbound": "2026-03-07",
+        "inbound": "2026-03-20",
+        "label": "prioridad marzo",
+    }
+
     lines = [
-        "Monitor ofertas Cancún (SCL→CUN)",
-        f"Fecha UTC: {datetime.now(timezone.utc).isoformat()}",
-        f"Mejor precio visto: {best or 'N/D'} CLP",
+        "========================================",
+        " ALERTA OFERTAS · Chile → Cancún",
+        "========================================",
+        f"Check (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+        f"Mejor precio visto: {format_clp(best)} CLP por persona (ida y vuelta)",
         f"Clasificación: {level or 'sin oferta bajo umbral'}",
         "",
-        "Fuentes:",
+        "----------------------------------------",
+        " CÓMO REPLICAR LA BÚSQUEDA (copiar tal cual)",
+        "----------------------------------------",
+        "VUELOS",
+        "  Sitio: Google Flights  (recomendado) o Kayak / Despegar",
+        "  Origen: Santiago (SCL) — Aeropuerto Arturo Merino Benítez",
+        "  Destino: Cancún (CUN)",
+        "  Tipo: Ida y vuelta",
+        f"  Ida: {primary['outbound']}   Vuelta: {primary['inbound']}"
+        + (f"   ({primary['label']})" if primary.get("label") else ""),
+        "  Pasajeros: 1 adulto + 1 niño (8 años / categoría 2–11)",
+        "  Clase: Económica",
+        "  Escalas: da igual (priorizar precio); si puedes, directo LATAM",
+        "  Moneda: CLP",
+        "",
+        "Otras ventanas a probar (mismas personas/clase):",
+    ]
+    for w in windows[1:]:
+        lines.append(
+            f"  · Ida {w['outbound']}  /  Vuelta {w['inbound']}"
+            + (f"  — {w['label']}" if w.get("label") else "")
+        )
+
+    lines += [
+        "",
+        "HOSPEDAJE (Cancún Norte — playa calmada)",
+        "  Zona: Zona Hotelera Km 1–9 (bahía norte)",
+        "  Nombres a buscar: Grand Oasis Palm | Occidental Costa Cancún | Riu Caribe",
+        "  Fechas hotel: mismas que el vuelo (noche de llegada = día de ida)",
+        "  Huéspedes: 1 adulto + 1 niño",
+        "  Preferencia: Todo incluido si el precio es razonable",
+        "  Evitar para nadar con niña: Km 9–20 / Playa Delfines (más oleaje)",
+        "",
+        "PASOS RÁPIDOS EN GOOGLE FLIGHTS",
+        "  1) Entrá a google.com/travel/flights (Chile / CLP)",
+        "  2) Completá los parámetros de VUELOS de arriba",
+        "  3) Ordená por precio y anotá el más barato",
+        "  4) Si está bajo umbral EXCELENTE, conviene comprar",
+        "",
+        "----------------------------------------",
+        " PRECIOS DETECTADOS EN ESTE CHECK",
+        "----------------------------------------",
     ]
     for q in quotes:
         err = q.get("error")
+        src = q.get("source")
         if err:
-            lines.append(f"- {q.get('source')}: ERROR {err}")
+            lines.append(f"- {src}: sin dato ({err[:80]})")
         else:
-            extra = f" USD={q['best_rt_usd']}" if q.get("best_rt_usd") else ""
-            lines.append(
-                f"- {q.get('source')}: {q.get('best_rt_clp') or 'N/D'} CLP{extra} | {q.get('url', '')}"
-            )
+            extra = f" | USD {q['best_rt_usd']}" if q.get("best_rt_usd") else ""
+            lines.append(f"- {src}: {format_clp(q.get('best_rt_clp'))} CLP{extra}")
+
     lines += [
         "",
-        "Umbrales: BUENA ≤ "
-        f"{env_int('THRESHOLD_GOOD', 500_000)} · EXCELENTE ≤ "
-        f"{env_int('THRESHOLD_GREAT', 430_000)}",
+        "Umbrales (por persona, ida/vuelta):",
+        f"  BUENA ≤ {format_clp(env_int('THRESHOLD_GOOD', 500_000))}",
+        f"  EXCELENTE ≤ {format_clp(env_int('THRESHOLD_GREAT', 430_000))}",
+        f"  Paquete vuelo+hotel ≤ {format_clp(env_int('THRESHOLD_PACKAGE', 950_000))}",
         "",
-        "Prioridad: marzo 2026 · Cancún Zona Hotelera norte · 1 adulto + niña 8 años",
-        "Regla BF: hotel/paquete sí mirar BF; vuelo marzo bueno → tomar ya.",
+        "Nota: no dependas de links automáticos (a veces abren la home).",
+        "Usá siempre estos parámetros para simular la misma búsqueda.",
+        "Monitor WFitness · cada pocas horas · aristides20@gmail.com",
     ]
     return "\n".join(lines)
 
