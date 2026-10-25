@@ -3,5 +3,6 @@ config.env
 .venv/
 __pycache__/
 data/state.json
+data/state_vln.json
 logs/
 *.pyc
